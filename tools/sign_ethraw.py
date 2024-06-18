@@ -4,8 +4,8 @@ import os
 import sys
 from getpass import getpass
 from binascii import hexlify
-from ethereum import utils
-from ethereum import transactions
+# from ethereum import utils
+# from ethereum import transactions
 from binascii import unhexlify
 import rlp
 import json
@@ -17,72 +17,66 @@ from eth_keys.datatypes import (
 )
 from eth_utils import (
     decode_hex,
+    encode_hex,
     is_same_address,
     to_canonical_address,
+)
+from eth_typing import Address
+
+from eth.vm.forks.berlin.transactions import (
+    BerlinTransactionBuilder,
+    BerlinLegacyTransaction
+)
+from eth.vm.forks.frontier.transactions import (
+    FrontierTransaction,
+)
+from eth.vm.forks.homestead.transactions import (
+    HomesteadTransaction,
+)
+from eth.vm.forks.spurious_dragon.transactions import (
+    SpuriousDragonTransaction,
 )
 
 EVM_SENDER_KEY  = os.getenv("EVM_SENDER_KEY", None)
 EVM_CHAINID     = int(os.getenv("EVM_CHAINID", "15555"))
+GAS_PRICE       = int(os.getenv("GAS_PRICE", "150000000000")) #1 GWei
+GAS             = int(os.getenv("GAS", "1000000"))          #1m Gas
 
 if len(sys.argv) < 6:
     print("{0} FROM TO AMOUNT INPUT_DATA NONCE".format(sys.argv[0]))
     sys.exit(1)
 
 _from = sys.argv[1].lower()
-if _from[:2] == '0x': _from = _from[2:]
+_from = Address(decode_hex(_from))
 
 _to     = sys.argv[2].lower()
-if _to[:2] == '0x': _to = _to[2:]
+_to = Address(decode_hex(_to))
 
 _amount = int(sys.argv[3])
-nonce = int(sys.argv[5])
+_data = unhexlify(sys.argv[4])
+_nonce = int(sys.argv[5])
+_gas_price = GAS_PRICE
+_gas       = GAS
 
+transaction_class = BerlinLegacyTransaction
 
-# if not EVM_SENDER_KEY:
-#     EVM_SENDER_KEY = getpass('Enter private key for {0}:'.format(_from))
-# # key = keys.PrivateKey(decode_hex(EVM_SENDER_KEY))
-# key = PrivateKey(decode_hex(EVM_SENDER_KEY))
-
-
-# rlptx = rlp.encode(signed_txn, BerlinLegacyTransaction)
-
-
-unsigned_tx = transactions.Transaction(
-    nonce,
-    1000000000,   #1 GWei
-    1000000,      #1m Gas
-    _to,
-    _amount,
-    unhexlify(sys.argv[4])
-)
 
 if not EVM_SENDER_KEY:
     EVM_SENDER_KEY = getpass('Enter private key for {0}:'.format(_from))
 
+key = keys.PrivateKey(decode_hex(EVM_SENDER_KEY))
 
-def sign(tx, key, network_id=None):
-    """Sign this transaction with a private key.
+unsigned_tx = transaction_class.create_unsigned_transaction(
+    nonce       = _nonce,
+    gas_price   = _gas_price,
+    gas         = _gas,
+    to          = _to,
+    value       = _amount,
+    data        = _data
+)
 
-    A potentially already existing signature would be overridden.
-    """
-    if network_id is None:
-        rawhash = utils.sha3(rlp.encode(transactions.unsigned_tx_from_tx(tx), transactions.UnsignedTransaction))
-    else:
-        assert 1 <= network_id < 2**63 - 18
-        rlpdata = rlp.encode(rlp.infer_sedes(tx).serialize(tx)[
-                                :-3] + [network_id, b'', b''])
-        rawhash = utils.sha3(rlpdata)
-    key = transactions.normalize_key(key)
-    v, r, s = utils.ecsign(rawhash, key)
-    if network_id is not None:
-        v += 8 + network_id * 2
-    ret = tx.copy(
-        v=v,r=r,s=s
-    )
-    ret._sender = utils.privtoaddr(key)
-    return ret
+signed_tx = unsigned_tx.as_signed_transaction(key, EVM_CHAINID)
 
-# rlptx = rlp.encode(unsigned_tx.sign(EVM_SENDER_KEY, EVM_CHAINID), transactions.Transaction)
-rlptx = rlp.encode(sign(unsigned_tx, EVM_SENDER_KEY, EVM_CHAINID), transactions.Transaction)
+rlptx = rlp.encode(signed_tx, transaction_class)
 
-print("Eth signed raw transaction is {}".format(rlptx.hex()))
+print("Eth signed raw transaction is 0x{}".format(rlptx.hex()))
