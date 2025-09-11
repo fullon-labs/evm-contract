@@ -9,6 +9,10 @@ config_wrapper::config_wrapper(eosio::name self) : _self(self), _config(self, se
     if(_exists) {
         _cached_config = _config.get();
     }
+    if (!_cached_config.evm_version.has_value()) {
+        _cached_config.evm_version = evm_version_type();
+        // Don't set dirty because action can be read-only.
+    }
     if (!_cached_config.consensus_parameter.has_value()) {
         _cached_config.consensus_parameter = consensus_parameter_type();
         // Don't set dirty because action can be read-only.
@@ -30,6 +34,62 @@ void config_wrapper::flush() {
     if(!is_dirty()) {
         return;
     }
+    eosio::print("flushing config\n");
+    eosio::print("version: ", _cached_config.version.value, "\n");
+    eosio::print("genesis_time: ", _cached_config.genesis_time.utc_seconds, "\n");
+    eosio::print("ingress_bridge_fee: ", _cached_config.ingress_bridge_fee, "\n");
+    eosio::print("gas_price: ", _cached_config.gas_price, "\n");
+    eosio::print("miner_cut: ", _cached_config.miner_cut, "\n");
+    eosio::print("status: ", _cached_config.status, "\n");
+    eosio::print("evm_version: ", bool(_cached_config.evm_version), "{\n");
+    if (_cached_config.evm_version) {
+        eosio::print("  pending_version: ", bool(_cached_config.evm_version->pending_version), "{\n");
+        if (_cached_config.evm_version->pending_version) {
+            eosio::print("    version: ", _cached_config.evm_version->pending_version->version, "\n");
+            eosio::print("    time: ", _cached_config.evm_version->pending_version->time.elapsed._count, "\n");
+        }
+
+        eosio::print("  }\n");
+        eosio::print("  cached_version: ", _cached_config.evm_version->cached_version, "\n");
+    }
+    eosio::print("}\n");
+
+    eosio::print("consensus_parameter: ", bool(_cached_config.consensus_parameter), "{\n");
+    if (_cached_config.consensus_parameter) {
+        eosio::print("  current: {\n");
+        std::visit([&](auto&& v) {
+            eosio::print("    gas_txnewaccount: ", v.gas_parameter.gas_txnewaccount, "\n");
+            eosio::print("    gas_newaccount: ", v.gas_parameter.gas_newaccount, "\n");
+            eosio::print("    gas_txcreate: ", v.gas_parameter.gas_txcreate, "\n");
+            eosio::print("    gas_codedeposit: ", v.gas_parameter.gas_codedeposit, "\n");
+            eosio::print("    gas_sset: ", v.gas_parameter.gas_sset, "\n");
+        }, _cached_config.consensus_parameter->current);
+
+        eosio::print("  }\n");
+        eosio::print("  pending: ", bool(_cached_config.consensus_parameter->pending), "{\n");
+        if (_cached_config.consensus_parameter->pending) {
+            std::visit([&](auto&& v) {
+                eosio::print("    gas_txnewaccount: ", v.gas_parameter.gas_txnewaccount, "\n");
+                eosio::print("    gas_newaccount: ", v.gas_parameter.gas_newaccount, "\n");
+                eosio::print("    gas_txcreate: ", v.gas_parameter.gas_txcreate, "\n");
+                eosio::print("    gas_codedeposit: ", v.gas_parameter.gas_codedeposit, "\n");
+                eosio::print("    gas_sset: ", v.gas_parameter.gas_sset, "\n");
+            }, _cached_config.consensus_parameter->pending->data);
+            eosio::print("    pending_time: ", _cached_config.consensus_parameter->pending->pending_time.elapsed._count, "\n");
+        }
+        eosio::print("}\n");
+    }
+
+        // 序列化并打印hex
+    auto buf = eosio::pack(_cached_config);
+    eosio::print("serialized config hex: ");
+    eosio::printhex(buf.data(), buf.size());
+    eosio::print("\n");
+
+    // test unpack
+    auto unpacked = eosio::unpack<config>(buf);
+    eosio::print("unpacked config OK!\n");
+
     _config.set(_cached_config, _self);
     clear_dirty();
     _exists = true;
@@ -39,7 +99,7 @@ bool config_wrapper::exists() {
     return _exists;
 }
 
-eosio::unsigned_int config_wrapper::get_version()const { 
+eosio::unsigned_int config_wrapper::get_version()const {
     return _cached_config.version;
 }
 
